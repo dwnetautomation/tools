@@ -17,16 +17,15 @@ import time
 
 user = getuser()
 pw = getpass("Enter Password for user {0}: ".format(user)) 
-settings = yaml.safe_load(open('settings.yml','r'))
+settings = yaml.safe_load(open('/python3virtenv/python3virtenv/settings.yml','r'))
 totalsites = settings['totalsites'] # total number of sites #
 sites = settings['sites'] # site host list #
 dmtcm = settings['dmtcm'] # # plain/decimal mitigation community tag for json #
 cscom = settings['cscom'] # customer route community tag #
 agcom = settings['agcom'] # aggregate route community tag #
-transit1 = settings['transit1'] # transit provider #
-transit2 = settings['transit2'] # transit provider #
 now = datetime.now()
 dts = now.strftime("%Y-%d-%m %H:%M:%S")
+timeout = 60
 
 # get tms mitigation source prefix for upstream mitigation agg route from site GoBGP route-server #
 def get_tms_mits(user,pw,mitpfx,site):
@@ -61,7 +60,7 @@ def get_tms_mits(user,pw,mitpfx,site):
 # get upstream aggregate route source, type of route, as-path/prepends if applicable from site Juniper edge router #
 def get_sr_mits(user,pw,mitpfx,site,dev,cscom,agcom):
     rpc_rt = dev.rpc.get_route_information({'format':'json'},destination=mitpfx,table='inet.0',community=agcom,best=True,\
-            detail=True,active_path=True)
+            detail=True,active_path=True, dev_timeout=timeout)
     try:
         rt = rpc_rt['route-information'][0]['route-table'][0]['rt'][0]['rt-entry'][0]['gateway'][0]['data']
         rtdcl = rpc_rt['route-information'][0]['route-table'][0]['rt'][0]['rt-entry'][0]['communities'][0]['community']
@@ -79,7 +78,7 @@ def get_sr_mits(user,pw,mitpfx,site,dev,cscom,agcom):
             rtn = (str(dns.resolver.query(rtnq,"PTR")[0]))[:-21]
         except:
             rtn = 'dns_not_found'
-        if rtn.split('.')[1] == site:
+        if '.' in rtn:
             if rt.split('.')[3] == '224':
                 if rtap != '':
                     rtno = (\
@@ -94,6 +93,8 @@ def get_sr_mits(user,pw,mitpfx,site,dev,cscom,agcom):
                 rtno = \
         '**** Transit facing AGG ROUTE {0} SOURCED locally from rs01.{1} ****\nLearning mitigation agg route: '\
         .format(mitpfx,site) + mitpfx + ' from ' + rt + ' - ' + rtn + '\n'
+            else:
+                rtno = 'Learning route: ' + mitpfx + ' from ' + rt + ' - ' + rtn + '\n'
         else:
             if 'Originator ID: 172.16' in rtap:
                 rtno = 'Learning cust re-direct route: ' + mitpfx + ' from ' + rt + ' - ' + rtn + '\n*** ' + rtap\
@@ -107,14 +108,14 @@ def get_sr_mits(user,pw,mitpfx,site,dev,cscom,agcom):
 # get advertised transit neighbors for upstream mitigation/re-direct route from Juniper edge router #
 # - combine and return all route data #
 def get_mit_advnei(user,pw,mitpfx,site,tmsrtl,rtno,dev,host):
-    rpc_ns = dev.rpc.get_bgp_neighbor_information()
+    rpc_ns = dev.rpc.get_bgp_neighbor_information(dev_timeout=timeout)
     ns = jxmlease.parse(etree.tostring(rpc_ns, pretty_print=True, encoding='unicode'))\
             ['bgp-information']['bgp-peer']
     neighs = '\n'.join([(str(d['peer-address'])).split('+')[0] for d in ns if d['peer-group'] in \
-            {transit1,transit2}]).split('\n')
+            {'LLNW','NTT-ATTACK'}]).split('\n')
     rsts = []
     for nei in neighs:
-        rpc_ad = dev.rpc.get_route_information(advertising_protocol_name='bgp', neighbor=nei)
+        rpc_ad = dev.rpc.get_route_information(advertising_protocol_name='bgp',neighbor=nei, dev_timeout=timeout)
         try:
             ad = xmltodict.parse(etree.tostring(rpc_ad, pretty_print=True, encoding='unicode'))\
                     ['route-information']['route-table']
@@ -148,7 +149,7 @@ def get_mit_advnei(user,pw,mitpfx,site,tmsrtl,rtno,dev,host):
 def get_routing_data(user,pw,mitpfx,site,cscom,agcom):
     tmsrtl = get_tms_mits(user,pw,mitpfx,site)
     host = 'sr01.' + site # site router host #
-    dev = Device(host=host, user=user, password=pw, port='22', normalize=True)
+    dev = Device(host=host, user=user, password=pw, port='22', normalize=True, dev_timeout=timeout)
     dev.open()
     rtno = get_sr_mits(user,pw,mitpfx,site,dev,cscom,agcom)
     rsts_output = get_mit_advnei(user,pw,mitpfx,site,tmsrtl,rtno,dev,host)
@@ -175,4 +176,3 @@ def main():
         print(dts,'\nno active mitigation agg routes found for {0}\n'.format(mitpfx))
 
 main()
-
