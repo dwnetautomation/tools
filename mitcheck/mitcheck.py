@@ -1,5 +1,6 @@
-#!/usr/bin/python3
+#!/python3virtenv/mitcheck_venv/bin/python3.8
 
+import argparse
 from jnpr.junos import Device
 from lxml import etree
 import jxmlease
@@ -15,9 +16,19 @@ import re
 import json
 import time
 
+
+parser = argparse.ArgumentParser(description='mitcheck help')
+parser.add_argument(
+        type=str,
+        help="Requires a /24 mitigation route\nExample:'mitcheck 200.220.20.0/24'",
+        dest='route'
+        )
+args = vars(parser.parse_args())
+mitpfx = args['route']
+
 user = getuser()
 pw = getpass("Enter Password for user {0}: ".format(user))
-settings = yaml.safe_load(open("settings.yml", "r"))
+settings = yaml.safe_load(open("/python3virtenv/mitcheck_venv/settings.yml", "r"))
 totalsites = settings["totalsites"]  # total number of sites #
 sites = settings["sites"]  # site host list #
 dmtcm = settings["dmtcm"]  # # plain/decimal mitigation community tag for json #
@@ -25,7 +36,6 @@ cscom = settings["cscom"]  # customer route community tag #
 agcom = settings["agcom"]  # aggregate route community tag #
 now = datetime.now()
 dts = now.strftime("%Y-%d-%m %H:%M:%S")
-timeout = 45
 
 # get tms mitigation source prefix for upstream mitigation agg route from site GoBGP route-server #
 def get_tms_mits(user, pw, mitpfx, site):
@@ -60,7 +70,7 @@ def get_tms_mits(user, pw, mitpfx, site):
             tmsrtsdn = (json.loads(js))["attrs"][2]["nexthop"]
             try:
                 dnsq = dns.reversename.from_address(tmsrtsdn)
-                tmshost = (str(dns.resolver.query(dnsq, "PTR")[0]))[:-21]
+                tmshost = (str(dns.resolver.resolve(dnsq, "PTR")[0]))[:-21]
             except:
                 tmshost = "dns_not_found"
             tmsrt = "TMS {0}({1}) advertising mitigation source prefix {2} to {3} for upstream mitigation agg route {4}".format(
@@ -81,7 +91,6 @@ def get_sr_mits(user, pw, mitpfx, site, dev, cscom, agcom):
         best=True,
         detail=True,
         active_path=True,
-        dev_timeout=timeout,
     )
     try:
         rt = rpc_rt["route-information"][0]["route-table"][0]["rt"][0]["rt-entry"][0][
@@ -103,7 +112,7 @@ def get_sr_mits(user, pw, mitpfx, site, dev, cscom, agcom):
     if rt != "" and cscom not in rtcl:
         try:
             rtnq = dns.reversename.from_address(rt)
-            rtn = (str(dns.resolver.query(rtnq, "PTR")[0]))[:-21]
+            rtn = (str(dns.resolver.resolve(rtnq, "PTR")[0]))[:-21]
         except:
             rtn = "dns_not_found"
         if "." in rtn:
@@ -183,7 +192,7 @@ def get_sr_mits(user, pw, mitpfx, site, dev, cscom, agcom):
 # get advertised transit neighbors for upstream mitigation/re-direct route from Juniper edge router #
 # - combine and return all route data #
 def get_mit_advnei(user, pw, mitpfx, site, tmsrtl, rtno, dev, host):
-    rpc_ns = dev.rpc.get_bgp_neighbor_information(dev_timeout=timeout)
+    rpc_ns = dev.rpc.get_bgp_neighbor_information()
     ns = jxmlease.parse(etree.tostring(rpc_ns, pretty_print=True, encoding="unicode"))[
         "bgp-information"
     ]["bgp-peer"]
@@ -197,7 +206,7 @@ def get_mit_advnei(user, pw, mitpfx, site, tmsrtl, rtno, dev, host):
     rsts = []
     for nei in neighs:
         rpc_ad = dev.rpc.get_route_information(
-            advertising_protocol_name="bgp", neighbor=nei, dev_timeout=timeout
+            advertising_protocol_name="bgp", neighbor=nei
         )
         try:
             ad = xmltodict.parse(
@@ -212,7 +221,7 @@ def get_mit_advnei(user, pw, mitpfx, site, tmsrtl, rtno, dev, host):
             advpfx = mitpfx
             try:
                 neiq = dns.reversename.from_address(nei)
-                nei_dns = str(dns.resolver.query(neiq, "PTR")[0])
+                nei_dns = str(dns.resolver.resolve(neiq, "PTR")[0])
             except:
                 nei_dns = "dns_not_found"
             rst = (
@@ -256,7 +265,6 @@ def get_routing_data(user, pw, mitpfx, site, cscom, agcom):
         password=pw,
         port="22",
         normalize=True,
-        dev_timeout=timeout,
     )
     try:
         dev.open()
@@ -273,11 +281,6 @@ def get_routing_data(user, pw, mitpfx, site, cscom, agcom):
 
 # launch script with threading - execute for all sites at once - return and print outputs #
 def main():
-    mitpfx = str(
-        input(
-            "Enter /24 transit facing aggregate mitigation route(example:'200.220.20.0/24'): "
-        )
-    )
     print(
         "route collection in progress, standby, this can take up to 1 minute to complete...\n"
     )
@@ -303,3 +306,4 @@ def main():
 
 
 main()
+
