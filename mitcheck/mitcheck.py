@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-# David Weber - Network Automation
 
 from jnpr.junos import Device
 from lxml import etree
