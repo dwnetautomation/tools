@@ -202,17 +202,49 @@ def create_or_update_inventory_source(token, inventory_id, project_id, inventory
         if update:
             print(f"Inventory source '{source_data['name']}' updated with ID: {new_source_id}\n")
         else:
-            print(f"Inventory source '{source_data['name']}' created with ID: {new_source_id}\n")
+            print(f"Inventory source '{source_data['name']}' created with ID: {new_source_id}")
         update_url = BASE_URL + f"inventory_sources/{new_source_id}/update/"
         response = requests.post(update_url, headers=HEADERS, verify=False)
         if response.status_code in [200, 202]:
-            print(f"Inventory source {new_source_id} update initiated successfully.")
+            print(f"Inventory source {new_source_id} update initiated successfully.\n")
         else:
             print(f"Failed to initiate update for inventory source {new_source_id}. Response: {response.text}")
         return new_source_id
     else:
         print(f"Failed to set inventory source '{source_data['name']}'. Response: {response.text}\n")
         return False
+
+
+def add_job_template_credential(token, cred_name, new_jt_id):
+    HEADERS["Authorization"] = f"Bearer {token}"
+    cred_id = get_object_id(token, "credentials/", cred_name)
+    ex_jt_creds_resp = requests.get(BASE_URL + "job_templates/" + str(new_jt_id) + "/credentials/", headers=HEADERS, verify=False)
+
+    if ex_jt_creds_resp.status_code == 200:
+        ex_jt_creds = ex_jt_creds_resp.json().get('results', [])
+        if ex_jt_creds:
+            existing_jt_creds = []
+            for cred in ex_jt_creds:
+                if cred_name == cred['name']:
+                    existing_jt_creds.append(cred_name)
+
+    if cred_name not in existing_jt_creds: 
+        cred_type_resp = requests.get(BASE_URL + "credentials/" + str(cred_id) + "/", headers=HEADERS, verify=False)
+        if cred_type_resp.status_code == 200:
+            cred_type_id = cred_type_resp.json().get('credential_type', None)
+            if cred_type_id:
+                cred_data = {"credential": cred_id, "name": cred_name, "credential_type": cred_type_id, "associate": True}
+                response = requests.post(BASE_URL + "job_templates/" + str(new_jt_id) + "/credentials/", headers=HEADERS, json=cred_data, verify=False)
+                if response.status_code in [200, 201]:
+                    print(f"credential '{cred_name}' with id '{cred_id}' added to job template\n")
+                else:
+                    print(f"Failed to add credential to job template. Response: {response.text}\n")
+            else:
+                print(f"Failed to add credential to job template. Response: {cred_type_resp.text}\n")    
+        else:
+            print(f"Failed to add credential to job template. Response: {cred_type_resp.text}\n")
+    else:
+        print(f"credential '{cred_name}' already exists on job template ID: {new_jt_id}")
 
 
 def create_or_update_job_template(token, jt_data):
@@ -252,6 +284,12 @@ def create_or_update_job_template(token, jt_data):
             print(f"Job template '{jt_data['name']}' updated with ID: {new_jt_id}\n")
         else:
             print(f"Job template '{jt_data['name']}' created with ID: {new_jt_id}\n")
+        if isinstance(jt_data['summary_fields'].get('credentials'), list):
+            creds = jt_data['summary_fields'].get('credentials')
+            for cred in creds:
+                cred_name = cred.get('name')
+                add_job_template_credential(token, cred_name, new_jt_id)
+            print("\n")
         return new_jt_id
     else:
         print(f"Failed to create job template. Response: {response.text}\n")
